@@ -1,0 +1,32 @@
+* Data flow tests
+
+This is another playground package for the http2 server coding.
+
+The http2 data flow from the requestor to the server and back to the requestor
+has many steps.
+
+For a simple request, without data sent by client and without buffers, and ignoring other response frames:
+
+: Requestor (URL) -> frames (header...) -> openssl -> socket -> network -> socket -> openssl -> frames -> server -> response body (as string) -> response body (as octets) -> compressed response body (as octets) -> openssl -> socket -> network -> socket -> openssl -> compressed response -> decompressed response -> string response -> using the response.
+
+Some need buffering with buffer size and behaviour to decide,
+some are not clearly defined at first sight (e.g., if you push data to openssl,
+will the outpuch chunks depend on how you put it in?), some are
+non-deterministic to be modeled only (TCP communication with window, delays
+etc).
+
+There are additional complications that openssl sometimes needs to write to be
+able to read (or the other way around?), so it is not a simple one way pipeline.
+
+In this package I want to test behaviour of some parts of the pipeline and best ways to push/pull it.
+
+** Components
+- sink
+- buffer
+- various sources
+
+** Data processing functions
+
+There is a ~push-pipe~ function to move the data from the first component of the pipeline to the last one.
+
+The ~flush-pipe~ is similar, but tries to remove all intermediate buffered states.
