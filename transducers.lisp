@@ -14,7 +14,7 @@ copied if needed outside of functions dynamix extent."))
 This does not allow specification of the limited data request, so you have the
 data and should use them in full."))
 
-(defgeneric transduced-read-chunk (transducer chunk-size)
+(defgeneric transducer-read-chunk (transducer chunk-size)
   (:documentation "Read chunk of data from transducer if available, or return nil"))
 
 (defgeneric transducer-flush-read (transducer)
@@ -33,7 +33,9 @@ data and should use them in full."))
   ((data      :accessor get-data      :initarg :data)
    (threshold :accessor get-threshold :initarg :threshold)
    (start     :accessor get-start     :initarg :start)
-   (end       :accessor get-end       :initarg :end))
+   (end       :accessor get-end       :initarg :end)
+   (flushed   :accessor get-flushed   :initarg :flushed
+              :initform nil))
   (:documentation
    "A buffer of size specified at the creation time and a threshold. The data are
 not released unless there is at least THRESHOLD of them.")
@@ -48,9 +50,11 @@ not released unless there is at least THRESHOLD of them.")
     (with-slots (start end data threshold) buffer
         (format out "~d of ~d, threshold ~d" (- end start) (length data) threshold))))
 
-(defun buffer-size (buffer)
-  (with-slots (start end) buffer
-    (- end start)))
+(defgeneric buffer-size (buffer)
+  (:method (buffer) 0)
+  (:method ((buffer buffer))
+    (with-slots (start end) buffer
+      (- end start))))
 
 (defmethod transducer-write (new-data (buffer buffer))
   (let ((data-size (length new-data)))
@@ -63,18 +67,22 @@ not released unless there is at least THRESHOLD of them.")
         (t (error "Implement me: data do not fit the buffer, but maybe still could."))))))
 
 (defgeneric transducer-flush (o)
-  (:method (o)))
+  (:method (o))
+  (:method ((b buffer))
+    (setf (slot-value b 'flushed) t)))
 
 (defmethod transducer-full-read ((buffer buffer))
-  (with-slots (data start end threshold) buffer
-    (when (>= (- end start) threshold)
+  (with-slots (data start end threshold flushed) buffer
+    (when (or (and flushed (> end start))
+              (>= (- end start) threshold))
       (let ((old-start start)
             (old-end end))
         (setf start 0 end 0)
         (values data old-start old-end)))))
 
 (defsection @source (:title "Simple data source")
-  (repeating-source class))
+  (repeating-source class)
+  (random-source class))
 
 (defclass repeating-source (transducer)
   ((pattern :accessor get-pattern :initarg :pattern)
@@ -108,7 +116,8 @@ not released unless there is at least THRESHOLD of them.")
   (print new-data))
 
 (defsection @pusher (:title "Pusher")
-  (push-pipe function))
+  (push-pipe function)
+  (push-flush-pipe function))
 
 (defun push-pipe (pipe)
   (when (cdr pipe)
@@ -130,7 +139,7 @@ not released unless there is at least THRESHOLD of them.")
     pipe))
 
 (defsection @gzip (:title "gzip decoder and encoder")
-  )
+  (gzip-encoder class))
 
 (defclass buffer-as-output-stream (trivial-gray-streams:fundamental-output-stream)
   ((buffer :accessor get-buffer :initarg :buffer)))
@@ -152,4 +161,18 @@ not released unless there is at least THRESHOLD of them.")
   (write-sequence data (get-stream encoder)))
 
 (defmethod transducer-flush ((transducer gzip-encoder))
-  (trivial-gray-streams:stream-finish-output (get-stream transducer)))
+  ;; this should write the data to the underlying buffer
+  (trivial-gray-streams:stream-finish-output (get-stream transducer))
+  (transducer-flush (get-buffer transducer)))
+
+(defsection @pipes (:title "Simplified pipe creation")
+  (make-pipe function))
+
+(defun make-pipe (description)
+  "Make a pipe matching DESCRIPTION. The parameter is a list where each item is of form
+CLASS-NAME or (CLASS-NAME initialization-parameter ...)"
+  (loop for item in description
+        unless (listp item)
+          do (setf item (list item))
+        collect
+           (apply #'make-instance (car item) (rest item))))

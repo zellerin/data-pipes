@@ -21,12 +21,15 @@ able to read (or the other way around?), so it is not a simple one way pipeline.
 In this package I want to test behaviour of some parts of the pipeline and best ways to push/pull it.
 
 ** Components
+The core part are pieces . Lets call them, for lack of better name, transducers, in line with how [[https://www.cs.cmu.edu/Groups/AI/html/cltl/clm/node347.html][series]] documentation calls similar operation; the difference is that the transducers here operate on the vectors (strings or octet vectors) and that they can return variable number of data chunks for each input.
+
 - sink
 - buffer
 - various sources
+- gzip encoder
 
 ** Data processing functions
 
 There is a ~push-pipe~ function to move the data from the first component of the pipeline to the last one.
 
-The ~flush-pipe~ is similar, but tries to remove all intermediate buffered states.
+The ~flush-pipe~ is similar, but tries to remove all intermediate buffered data.
