@@ -18,7 +18,8 @@ data and should use them in full."))
   (:documentation "Read chunk of data from transducer if available, or return nil"))
 
 (defgeneric transducer-flush-read (transducer)
-  (:documentation "Return all the data from the transducer "))
+  (:documentation "Return all the data from the transducer ")
+  (:method (transducer) (transducer-full-read transducer)))
 
 (defclass transducer ()
   ())
@@ -61,6 +62,9 @@ not released unless there is at least THRESHOLD of them.")
          data-size)
         (t (error "Implement me: data do not fit the buffer, but maybe still could."))))))
 
+(defgeneric transducer-flush (o)
+  (:method (o)))
+
 (defmethod transducer-full-read ((buffer buffer))
   (with-slots (data start end threshold) buffer
     (when (>= (- end start) threshold)
@@ -86,6 +90,18 @@ not released unless there is at least THRESHOLD of them.")
     (with-slots (pattern count) object
       (format out "~d×~a" count pattern))))
 
+(defclass random-source ()
+  ((base       :accessor get-base       :initarg :base)
+   (count      :accessor get-count      :initarg :count)
+   (randomness :accessor get-randomness :initarg :randomness))
+  (:default-initargs :randomness 64))
+
+(defmethod transducer-full-read ((source random-source))
+  (with-slots (base count randomness) source
+    (unless (minusp (decf count))
+      (map-into base (lambda () (random randomness)))
+      (values base 0 (length base)))))
+
 (defsection @sink (:title "Simple data sink"))
 
 (defmethod transducer-write (new-data (sink (eql :sink)))
@@ -103,7 +119,37 @@ not released unless there is at least THRESHOLD of them.")
       do
          (format t "~&~40a --- ~4d --> ~20a ~%" (car pipe) (- end start) (second pipe))
          (transducer-write (subseq data start end) (second pipe))
-         (push-pipe (cdr pipe)))))
+         (push-pipe (cdr pipe)))
+    pipe))
 
-(defmethod get-name ((transducer transducer))
-  (class-name (class-of transducer)))
+(defun push-flush-pipe (pipe)
+  (when (cdr pipe)
+    (transducer-flush (car pipe))
+    (push-pipe pipe)
+    (push-flush-pipe (cdr pipe))
+    pipe))
+
+(defsection @gzip (:title "gzip decoder and encoder")
+  )
+
+(defclass buffer-as-output-stream (trivial-gray-streams:fundamental-output-stream)
+  ((buffer :accessor get-buffer :initarg :buffer)))
+
+(defclass gzip-encoder (buffer-as-output-stream)
+  ((stream :accessor get-stream :initarg :stream)))
+
+(defmethod transducer-full-read ((transducer buffer-as-output-stream))
+  (transducer-full-read (get-buffer transducer)))
+
+(defmethod trivial-gray-streams:stream-write-sequence ((buffer buffer-as-output-stream)
+                                                       sequence start end &key &allow-other-keys)
+  (transducer-write (subseq sequence start end) (get-buffer buffer)))
+
+(defmethod initialize-instance :after ((encoder gzip-encoder) &key)
+  (setf (slot-value encoder 'stream) (gzip-stream:make-gzip-output-stream encoder)))
+
+(defmethod transducer-write (data (encoder gzip-encoder))
+  (write-sequence data (get-stream encoder)))
+
+(defmethod transducer-flush ((transducer gzip-encoder))
+  (trivial-gray-streams:stream-finish-output (get-stream transducer)))
